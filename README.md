@@ -116,7 +116,7 @@ The ablation study includes:
 | `wo_ocr` | Remove OCR text token information. |
 | `wo_conf_mask` | Remove the confidence mask and compute BCE loss on all soft labels. |
 | `wo_pseudo_weak` | Binarize training soft labels into hard 0/1 labels. |
-| `wo_ppl_rab` | Remove PPL as a whole. Since RAB is implemented inside PPL, removing PPL also removes RAB, statistical pooling, and task-specific gating. |
+| `wo_ppl_rab` | Remove PPL as a whole. |
 
 ## Cross-source Experiment
 
