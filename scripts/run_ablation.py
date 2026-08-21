@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-LayoutLMv3 UI检测系统 - 消融实验
+LayoutLMv3 UI检测系统 - 自动化消融实验总控版
 
 """
 
@@ -62,8 +62,7 @@ RUN_ABLATIONS = [
     "wo_ocr",
     "wo_conf_mask",
     "wo_pseudo_weak",
-    "wo_ppl",
-    "wo_ppl_and_relation"
+    "wo_ppl_rab"
 ]
 
 # 如果要把完整模型也一起跑，可以改成：
@@ -74,8 +73,7 @@ RUN_ABLATIONS = [
 #     "wo_ocr",
 #     "wo_conf_mask",
 #     "wo_pseudo_weak",
-#     "wo_ppl",
-#     "wo_ppl_and_relation"
+#     "wo_ppl_rab"
 # ]
 
 NUM_EPOCHS = 30
@@ -908,12 +906,12 @@ class FinalModel(LayoutLMv3ForTokenClassification):
             "hidden_size"
         ) else 768
 
-        # w/o PPL / w/o PPL+RAB：不使用 Parallel Perception Layer，
-        # 直接使用 LayoutLMv3 最后一层的 first-token / [CLS] 表征。
-        if self.ablation not in [
-            "wo_ppl",
-            "wo_ppl_and_relation"
-        ]:
+        # w/o PPL/RAB：RAB 位于 PPL 内部。
+        # 因此移除 PPL 时，RAB、统计池化与任务特定 gating 会被一并绕过。
+        # 模型直接使用 LayoutLMv3 最后一层的 first-token / [CLS] 表征。
+        self.remove_ppl_rab = self.ablation == "wo_ppl_rab"
+
+        if not self.remove_ppl_rab:
             self.perception_layer = ParallelPerceptionLayer(
                 hidden_size,
                 ablation
@@ -962,10 +960,7 @@ class FinalModel(LayoutLMv3ForTokenClassification):
             attention_mask=attention_mask
         )
 
-        if self.ablation in [
-            "wo_ppl",
-            "wo_ppl_and_relation"
-        ]:
+        if self.remove_ppl_rab:
             cls_feat = outputs.last_hidden_state[:, 0, :]
 
             logit_o = self.head_overcrowd(
