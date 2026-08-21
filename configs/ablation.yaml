@@ -1,0 +1,145 @@
+experiment:
+  name: ablation_study
+  description: Controlled ablation experiments for RA-Layout.
+  task: multi_label_classification
+  defect_types:
+    - Overcrowding
+    - Misalignment
+    - Poor Visual Hierarchy
+
+ablations:
+  - wo_relation
+  - wo_geometry
+  - wo_ocr
+  - wo_conf_mask
+  - wo_pseudo_weak
+  - wo_ppl
+  - wo_ppl_and_relation
+
+ablation_definitions:
+  wo_relation: Remove relation-aware attention bias while retaining PPL.
+  wo_geometry: Remove handcrafted geometric features and use only the original bbox coordinates.
+  wo_ocr: Remove OCR text token information.
+  wo_conf_mask: Remove the confidence mask and compute BCE loss on all soft labels.
+  wo_pseudo_weak: Binarize training soft labels into hard 0/1 labels; validation and test keep continuous labels for metric computation.
+  wo_ppl: Remove the Parallel Perception Layer and directly use the first-token representation from LayoutLMv3.
+
+model:
+  base_model: microsoft/layoutlmv3-base
+  architecture: RA-Layout
+  backbone: LayoutLMv3
+  trainable_backbone_layers:
+    - 8
+    - 9
+    - 10
+    - 11
+  full_model:
+    use_ppl: true
+    use_relation_aware_attention_bias: true
+    use_handcrafted_geometry: true
+    use_ocr_tokens: true
+    classification_heads: independent_task_heads
+  wo_ppl_variants:
+    representation: first_token_final_hidden_state
+    classification_heads: independent_task_heads
+
+ppl:
+  bbox_encoder_input_dim: 8
+  bbox_encoder_input_dim_wo_geometry: 4
+  spatial_transformer_layers: 2
+  semantic_transformer_layers: 1
+  relation_vector_dim: 11
+  pooling:
+    - max
+    - mean
+    - std
+  task_specific_gating: true
+
+data:
+  dataset: OwlEye-LD
+  train_path: data/processed/owleye_ld/train.json
+  validation_path: data/processed/owleye_ld/validation.json
+  test_path: data/processed/owleye_ld/test.json
+  split: fixed_train_validation_test
+  calibration_data: train_only
+  max_length: 512
+
+labels:
+  type: continuous_soft_labels
+  label_dimensions:
+    - Overcrowding
+    - Misalignment
+    - Poor Visual Hierarchy
+  binarization_threshold_for_metrics: 0.5
+  wo_pseudo_weak:
+    training_labels: hard_binary_labels
+    rule: soft_label >= 0.5 becomes 1.0; otherwise 0.0
+    validation_test_labels: continuous_soft_labels
+
+loss:
+  function: BCEWithLogitsLoss
+  positive_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+  confidence_mask:
+    enabled_for:
+      - none
+      - wo_relation
+      - wo_geometry
+      - wo_ocr
+      - wo_ppl
+      - wo_ppl_and_relation
+    disabled_for:
+      - wo_conf_mask
+      - wo_pseudo_weak
+    excluded_range: [0.45, 0.55]
+    rule: exclude labels where 0.45 <= soft_label <= 0.55
+
+training:
+  seed: 42
+  num_train_epochs: 30
+  report_every: 3
+  eval_epochs:
+    - 3
+    - 6
+    - 9
+    - 12
+    - 15
+    - 18
+    - 21
+    - 24
+    - 27
+    - 30
+  train_batch_size: 16
+  eval_batch_size: 16
+  learning_rates:
+    layoutlmv3_last_four_layers: 2.0e-5
+    perception_layer: 1.0e-4
+    classification_heads: 1.0e-4
+  optimizer: AdamW
+  weight_decay: 0.01
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  fp16: true
+  save_strategy: "no"
+
+evaluation:
+  threshold: 0.5
+  metrics:
+    - AUC
+    - AUPRC
+    - Precision
+    - Recall
+    - F1
+    - Macro-F1
+    - Macro-AUC
+  report_splits:
+    - validation
+    - test
+
+output:
+  output_root: ablation_auto_results
+  long_csv: ablation_metrics_long_every3epochs.csv
+  wide_csv: ablation_metrics_wide_every3epochs.csv
+  final_test_csv: ablation_epoch30_test_wide_summary.csv
