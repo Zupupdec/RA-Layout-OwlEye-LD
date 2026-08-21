@@ -1,0 +1,142 @@
+experiment:
+  name: cross_source_multilabel
+  description: Cross-source multi-label validation for RA-Layout.
+  task: multi_label_classification
+  defect_types:
+    - Overcrowding
+    - Misalignment
+    - Poor Visual Hierarchy
+
+model:
+  base_model: microsoft/layoutlmv3-base
+  architecture: RA-Layout
+  backbone: LayoutLMv3
+  trainable_backbone_layers:
+    - 8
+    - 9
+    - 10
+    - 11
+  use_ppl: true
+  use_relation_aware_attention_bias: true
+  use_handcrafted_geometry: true
+  use_ocr_tokens: true
+  classification_heads: independent_task_heads
+  heads:
+    - head_overcrowd
+    - head_misalign
+    - head_hierarchy
+
+ppl:
+  bbox_encoder_input_dim: 8
+  spatial_transformer_layers: 2
+  semantic_transformer_layers: 1
+  relation_vector_dim: 11
+  pooling:
+    - max
+    - mean
+    - std
+  task_specific_gating: true
+
+data:
+  source_files:
+    rico: data/processed/source_subsets/rico.json
+    owleye: data/processed/source_subsets/owleye.json
+  split_method: screen_signature_key_level_split
+  train_ratio: 0.80
+  validation_ratio: 0.10
+  test_ratio: 0.10
+  remove_cross_source_overlap: true
+  leakage_check: screen_signature_key
+  calibration_data: current_training_set_only
+  max_length: 512
+
+experiments:
+  - name: rico_to_owleye
+    train_source: rico
+    validation_source: rico
+    test_source: owleye
+    description: Train on RICO-derived samples and evaluate cross-source generalization on OwlEye-derived samples.
+
+  - name: owleye_to_rico
+    train_source: owleye
+    validation_source: owleye
+    test_source: rico
+    description: Train on OwlEye-derived samples and evaluate cross-source generalization on RICO-derived samples.
+
+  - name: mixed_source
+    train_source: mixed
+    validation_source: mixed
+    test_source: mixed
+    description: Train and evaluate with mixed source-specific subsets using signature-level split.
+
+labels:
+  type: continuous_soft_labels
+  label_dimensions:
+    - Overcrowding
+    - Misalignment
+    - Poor Visual Hierarchy
+  binarization_threshold_for_metrics: 0.5
+  heuristic_thresholds:
+    coverage: train_set_75th_percentile
+    nearest_neighbor_distance: train_set_25th_percentile
+    hierarchy_defect: train_set_75th_percentile
+    misalignment_score: train_set_75th_percentile
+
+loss:
+  function: BCEWithLogitsLoss
+  positive_weights:
+    - 1.0
+    - 1.0
+    - 1.0
+  confidence_mask:
+    enabled: true
+    excluded_range: [0.45, 0.55]
+    rule: exclude labels where 0.45 <= soft_label <= 0.55
+
+training:
+  seed: 42
+  num_train_epochs: 30
+  report_every: 3
+  train_batch_size: 16
+  eval_batch_size: 16
+  learning_rates:
+    layoutlmv3_last_four_layers: 2.0e-5
+    perception_layer: 1.0e-4
+    classification_heads: 1.0e-4
+  optimizer: AdamW
+  weight_decay: 0.01
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  fp16: true
+  save_strategy: "no"
+
+evaluation:
+  threshold_modes:
+    - fixed_0.5
+    - val_calibrated
+  fixed_threshold: 0.5
+  validation_threshold_search:
+    start: 0.05
+    end: 0.95
+    step: 0.01
+    criterion: max_f1
+    apply_to_test: true
+    note: Test set is never used to search thresholds.
+  metrics:
+    - AUC
+    - AUPRC
+    - Precision
+    - Recall
+    - F1
+    - Macro-F1
+    - Micro-F1
+  report_splits:
+    - validation
+    - test
+
+output:
+  output_root: ra_layout_cross_source_table_results
+  all_metrics_csv: all_experiments_metrics_summary.csv
+  save_checkpoints: false
+  save_output_json: false
+  save_final_model: false
